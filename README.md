@@ -1,3 +1,7 @@
+# A fork of wdlRunR
+
+Dec 21 2017 -- branch vince started  -- need to use cromwell-jar version >= 30, address some inconsistencies in master (cromwell_base vs cromwellBase options) ... note also that wdlSource should be workflowSource
+
 # The wdlRunR package
 
 Follow development at [github](https://github.com/seandavi/wdlRunR).
