@@ -1,0 +1,126 @@
+---
+title: "SNP retrieval with wdlRunR"
+author: "Vincent J. Carey, stvjc at channing.harvard.edu"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+vignette: >
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteIndexEntry{SNP retrieval with wdlRunR}
+  %\VignetteEncoding{UTF-8}
+output:
+  BiocStyle::pdf_document:
+    toc: yes
+    number_sections: yes
+  BiocStyle::html_document:
+    highlight: pygments
+    number_sections: yes
+    theme: united
+    toc: yes
+---
+
+```{r setup,echo=FALSE,results="hide"}
+suppressPackageStartupMessages({
+suppressMessages({
+library(wdlRunR)
+library(VariantAnnotation)
+library(ldblock)
+})
+})
+```
+
+# Introduction
+
+This is a simple demonstration of WDL usage to 
+retrieve information about SNPs from 1000 genomes VCF in S3.
+
+The task is programmed in R as
+```
+Rscript -e "library(VariantAnnotation); library(ldblock); \
+    p1 = ScanVcfParam(which=GRanges('17', IRanges($1, $2))); \
+    saveRDS(rowRanges(readVcf(s3_1kg(17), param=p1)), $3)"
+```
+with three parameters to be defined at invocation: the
+start and end of the `IRanges` and the name of the
+destination file for RDS holding the rowRanges result of
+`VariantAnnotation::readVcf`.
+
+We will drive this process using utilities of `wdlRunR`.
+
+Once a local Cromwell server is running, the tasks are
+
+- compose WDL to define the workflow
+- build inputs in a data.frame instance to define the specific tasks
+- submit the job
+- retrieve outputs when ready
+
+# Workflow
+
+We want this workflow to be correct for the R installation
+with which it is being used.  So we start with a template
+for the WDL.  There is a single substitution in the `command`
+that will have to be installation-specific.
+
+```{r definetmpl}
+snps_wdl_tmpl = "task SnpsInTileObject {
+  Float start
+  Float end
+  String outpath
+  command {
+    sh %s ${start} ${end} ${outpath}
+  }
+  output {
+    File response = stdout() # needed?
+  }
+}
+workflow CollectSnps {
+  call SnpsInTileObject
+}"
+```
+
+To complete the workflow definition, we substitute
+the path of the script we want to run.
+
+```{r finish}
+snps_wdl = sprintf(snps_wdl_tmpl, 
+    system.file("shellScripts/sito.sh", package="wdlRunR"))
+cat(snps_wdl)
+```
+
+# Workflow inputs
+We need a data.frame that has columns named to respect
+the workflow and task names.  Each row will be mapped
+to a distinct task.
+```{r dodf}
+mydf = data.frame(
+CollectSnps.SnpsInTileObject.start=c(39e6,39.025e6),
+   CollectSnps.SnpsInTileObject.end=c(39.025e6, 39.05e6), 
+   CollectSnps.SnpsInTileObject.outpath=c("\\\'tile1.rds\\\'", 
+       "\\\'tile2.rds\\\'"), stringsAsFactors=FALSE)
+mydf
+```
+
+# Execution
+
+This section assumes you have a Cromwell server running locally.
+
+```{r doit}
+library(wdlRunR)
+res = cromwellBatch(wdlSource=snps_wdl, workflowInputs=mydf)
+Sys.sleep(5)
+qans = cromwellQuery()
+tail(qans)
+```
+
+# Retrieval
+
+Once we have 'Succeeded` status for the submitted jobs,
+we can retrieve the task result with code resembling the
+following.
+```
+myid = qans[nrow(qans)-2, "id"] # id for second-to-last task
+myout = cromwellOutputs(myid)   # output list
+#> names(myout)  # for example...
+#[1] "3bd49c15-6804-4c43-8d17-a174d58886db"
+#> names(myout[[1]])
+#[1] "CollectSnps.SnpsInTileObject.response"
+readRDS(paste0(dirname(myout[[1]][[1]]), "/tile1.rds"))
+```
